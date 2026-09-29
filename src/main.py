@@ -10,6 +10,7 @@ from otp.scanner import scan_with_camera
 from otp.storage import AccountStore
 
 store = AccountStore()
+THEME_PREF_KEY = "otapp.theme_mode"
 
 
 class OTPTile:
@@ -18,9 +19,9 @@ class OTPTile:
     def __init__(self, account: Account, app: "OTPApp"):
         self.account = account
         self.app = app
-        self.name_text = ft.Text(account.name, size=14)
-        self.otp_text = ft.Text(size=30)
-        self.countdown_text = ft.Text(size=30, color=ft.Colors.DEEP_PURPLE_500)
+        self.name_text = ft.Text(account.name, size=14, color=ft.Colors.ON_PRIMARY_CONTAINER)
+        self.otp_text = ft.Text(size=30, color=ft.Colors.ON_PRIMARY_CONTAINER)
+        self.countdown_text = ft.Text(size=30, color=ft.Colors.PRIMARY)
         self.progress_ring = ft.ProgressRing(width=16, height=16, stroke_width=18)
 
         card = ft.Container(
@@ -40,7 +41,7 @@ class OTPTile:
             width=350,
             height=100,
             alignment=ft.Alignment.CENTER,
-            bgcolor=ft.Colors.LIGHT_BLUE_100,
+            bgcolor=ft.Colors.PRIMARY_CONTAINER,
             on_click=self.copy_code,
             on_long_press=lambda e: self.app.show_options(self),
         )
@@ -104,15 +105,21 @@ class OTPApp:
         self.list_view = ft.Column(
             horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6
         )
-        self.text_field = ft.TextField(
-            hint_text="Add otp", width=280, border_radius=15, on_submit=self.add_from_text
-        )
         self.file_picker = ft.FilePicker()
+        self.prefs = ft.SharedPreferences()
 
-    def build(self):
+    async def build(self):
         page = self.page
         page.title = "OTP App"
-        page.theme_mode = ft.ThemeMode.LIGHT
+        page.theme = ft.Theme(color_scheme_seed=ft.Colors.LIGHT_BLUE)
+        page.dark_theme = ft.Theme(color_scheme_seed=ft.Colors.LIGHT_BLUE)
+        try:
+            saved_mode = await self.prefs.get(THEME_PREF_KEY)
+        except Exception:
+            saved_mode = None
+        page.theme_mode = ft.ThemeMode.DARK if saved_mode == "dark" else ft.ThemeMode.LIGHT
+        self.theme_button = ft.IconButton(on_click=self.toggle_theme)
+        self._sync_theme_button()
         page.scroll = ft.ScrollMode.ADAPTIVE
         page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
         page.appbar = ft.AppBar(
@@ -122,16 +129,15 @@ class OTPApp:
                               on_click=self.scan_camera),
                 ft.IconButton(ft.Icons.IMAGE, tooltip="Import QR from image",
                               on_click=self.scan_image),
+                self.theme_button,
             ],
         )
+        page.floating_action_button = ft.FloatingActionButton(
+            icon=ft.Icons.ADD, tooltip="Add account", on_click=lambda e: self.show_add_menu()
+        )
         page.add(
-            ft.Row(
-                [self.text_field,
-                 ft.FloatingActionButton(icon=ft.Icons.ADD, on_click=self.add_from_text)],
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
             ft.Text("Tap to copy · swipe right for options · swipe left to delete",
-                    size=11, color=ft.Colors.GREY_600),
+                    size=11, color=ft.Colors.ON_SURFACE_VARIANT),
             self.list_view,
         )
         for account in self.accounts.values():
@@ -146,6 +152,23 @@ class OTPApp:
                 tile.refresh(now)
             self.page.update()
             await asyncio.sleep(1 - now % 1)
+
+    # ---- theme ---------------------------------------------------------
+
+    def _sync_theme_button(self):
+        dark = self.page.theme_mode == ft.ThemeMode.DARK
+        self.theme_button.icon = ft.Icons.LIGHT_MODE if dark else ft.Icons.DARK_MODE
+        self.theme_button.tooltip = "Light theme" if dark else "Dark theme"
+
+    async def toggle_theme(self, e=None):
+        dark = self.page.theme_mode != ft.ThemeMode.DARK
+        self.page.theme_mode = ft.ThemeMode.DARK if dark else ft.ThemeMode.LIGHT
+        self._sync_theme_button()
+        self.page.update()
+        try:
+            await self.prefs.set(THEME_PREF_KEY, "dark" if dark else "light")
+        except Exception:
+            logging.exception("Failed to save theme preference")
 
     # ---- helpers -------------------------------------------------------
 
@@ -297,13 +320,67 @@ class OTPApp:
 
     # ---- add sources ---------------------------------------------------
 
-    def add_from_text(self, e=None):
-        text = self.text_field.value or ""
-        self.text_field.value = ""
-        if text.strip():
-            self.import_text(text)
-        else:
-            self.page.update()
+    def show_add_menu(self):
+        def pick(action):
+            async def handler(e):
+                if sheet.open:
+                    self.page.pop_dialog()
+                result = action()
+                if asyncio.iscoroutine(result):
+                    await result
+            return handler
+
+        sheet = ft.BottomSheet(
+            ft.Container(
+                padding=ft.Padding.only(bottom=16, top=8),
+                content=ft.Column(
+                    tight=True,
+                    controls=[
+                        ft.ListTile(title=ft.Text("Add account", weight=ft.FontWeight.BOLD)),
+                        ft.ListTile(leading=ft.Icon(ft.Icons.QR_CODE_SCANNER),
+                                    title=ft.Text("Scan QR with camera"),
+                                    on_click=pick(self.scan_camera)),
+                        ft.ListTile(leading=ft.Icon(ft.Icons.CONTENT_PASTE),
+                                    title=ft.Text("Paste otpauth:// link or secret"),
+                                    on_click=pick(self.show_paste_dialog)),
+                        ft.ListTile(leading=ft.Icon(ft.Icons.IMAGE),
+                                    title=ft.Text("Import QR from image"),
+                                    on_click=pick(self.scan_image)),
+                    ],
+                ),
+            ),
+        )
+        self.page.show_dialog(sheet)
+
+    async def show_paste_dialog(self):
+        field = ft.TextField(
+            label="otpauth:// link or secret",
+            autofocus=True,
+            multiline=True,
+            min_lines=1,
+            max_lines=4,
+        )
+
+        async def paste_clipboard(e):
+            field.value = (await ft.Clipboard().get()) or ""
+            field.update()
+
+        def add(e):
+            text = field.value or ""
+            self.page.pop_dialog()
+            if text.strip():
+                self.import_text(text)
+
+        field.suffix = ft.IconButton(ft.Icons.CONTENT_PASTE, tooltip="Paste from clipboard",
+                                     on_click=paste_clipboard)
+        self.page.show_dialog(ft.AlertDialog(
+            title=ft.Text("Add account"),
+            content=ft.Container(field, width=320),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                ft.TextButton("Add", on_click=add),
+            ],
+        ))
 
     async def scan_image(self, e=None):
         files = await self.file_picker.pick_files(
@@ -344,8 +421,8 @@ class OTPApp:
             self.import_text(text)
 
 
-def main(page: ft.Page):
-    OTPApp(page).build()
+async def main(page: ft.Page):
+    await OTPApp(page).build()
 
 
 if __name__ == "__main__":

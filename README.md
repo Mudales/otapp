@@ -4,8 +4,9 @@ Shows OTP codes like Google Authenticator. Built with [Flet](https://flet.dev) 1
 
 ## Features
 - Tap a code to copy it to the clipboard
+- Light / dark theme switch in the top bar (remembered between launches)
 - **Swipe right** on a card for options (copy, rename, delete), **swipe left** to delete (long-press also opens options)
-- Add accounts by:
+- Add accounts with the **+** button:
   - **Camera scan** of a QR code (top-bar scanner icon)
   - **QR from an image** / screenshot in the gallery (top-bar image icon)
   - Pasting an `otpauth://totp/...` URI or a bare base32 secret
@@ -23,8 +24,28 @@ pytest
 ```
 
 ## Build APK
+Locally (Flet downloads Flutter, the JDK and the Android SDK on first run):
 ```bash
 flet build apk
+# -> build/apk/*.apk ; install with: adb install -r build/apk/app-release.apk
 ```
 The camera permission is declared in `pyproject.toml` (`[tool.flet.android.permission]`).
 `pyzbar` and `pillow` Android wheels come from Flet's mobile package index.
+
+### CI builds and releases
+`.github/workflows/build-apk.yml`:
+- **Actions → Build APK → Run workflow** builds a test APK (download it from the run's artifacts).
+- Pushing a tag `vX.Y.Z` builds the APK and publishes a GitHub Release with it attached.
+
+**Signing:** add these repository secrets so every build is signed with the same key. Without them,
+each build gets a throwaway debug key, and Android refuses to install it over the previous build
+(you'd have to uninstall, which deletes your saved accounts).
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -i upload-keystore.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_PASSWORD` | key password |
+| `ANDROID_KEY_ALIAS` | key alias (e.g. `upload`) |
+
+Create the keystore once with `keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload` and keep it safe — losing it means users can't update in place.
