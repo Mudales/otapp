@@ -49,9 +49,7 @@ jobs:
         if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
           VERSION_ARGS="--build-version ${GITHUB_REF_NAME#v}"
         fi
-        flet build apk --yes --no-rich-output --build-number ${{ github.run_number }} $VERSION_ARGS
-        mkdir -p dist
-        cp build/apk/*.apk "dist/otapp-${GITHUB_REF_NAME//\//-}.apk"
+        FLET=flet ./build.sh --build-number ${{ github.run_number }} $VERSION_ARGS
 
     - uses: actions/upload-artifact@v4
       with:

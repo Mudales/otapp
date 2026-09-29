@@ -27,16 +27,20 @@ pytest
 ## Build APK
 Locally (Flet downloads Flutter, the JDK and the Android SDK on first run):
 ```bash
-flet build apk
-# -> build/apk/*.apk ; install with: adb install -r build/apk/app-release.apk
+source .venv/bin/activate   # Python 3.10+ environment with flet installed
+./build.sh
+# -> dist/otapp-<version>-universal.apk  (every phone)
+# -> dist/otapp-<version>-arm64.apk      (modern 64-bit phones, ~1/3 the size)
 ```
+Install one on a USB-connected phone with `adb install -r dist/otapp-<version>-arm64.apk`.
+A single `flet build apk` also works and writes `build/apk/otapp.apk`.
 The camera permission is declared in `pyproject.toml` (`[tool.flet.android.permission]`).
 `pyzbar` and `pillow` Android wheels come from Flet's mobile package index.
 
 ### CI builds and releases
 `.github/workflows/build-apk.yml`:
 - **Actions → Build APK → Run workflow** builds a test APK (download it from the run's artifacts).
-- Pushing a tag `vX.Y.Z` builds the APK and publishes a GitHub Release with it attached.
+- Pushing a tag `vX.Y.Z` builds both APKs and publishes a GitHub Release with them attached.
 
 **Signing:** add these repository secrets so every build is signed with the same key. Without them,
 each build gets a throwaway debug key, and Android refuses to install it over the previous build
