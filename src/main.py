@@ -3,6 +3,7 @@ import logging
 import time
 
 import flet as ft
+import flet_local_auth as fla
 
 from otp.accounts import Account, parse_any
 from otp.qr import decode_qr
@@ -11,6 +12,8 @@ from otp.storage import AccountStore
 
 store = AccountStore()
 THEME_PREF_KEY = "otapp.theme_mode"
+LOCK_PREF_KEY = "otapp.app_lock"
+RELOCK_AFTER = 30  # seconds in the background before the app locks again
 
 
 class OTPTile:
@@ -21,16 +24,25 @@ class OTPTile:
         self.app = app
         self.name_text = ft.Text(account.name, size=14, color=ft.Colors.ON_PRIMARY_CONTAINER)
         self.otp_text = ft.Text(size=30, color=ft.Colors.ON_PRIMARY_CONTAINER)
-        self.countdown_text = ft.Text(size=30, color=ft.Colors.PRIMARY)
+        self.countdown_text = ft.Text(size=22, color=ft.Colors.PRIMARY)
         self.progress_ring = ft.ProgressRing(width=16, height=16, stroke_width=18)
 
         card = ft.Container(
             content=ft.Column(
                 [
                     ft.Row([self.name_text], alignment=ft.MainAxisAlignment.CENTER),
-                    ft.Row(
-                        [self.otp_text, ft.Container(width=14), self.countdown_text, self.progress_ring],
-                        alignment=ft.MainAxisAlignment.CENTER,
+                    ft.Stack(
+                        height=44,
+                        controls=[
+                            ft.Container(self.otp_text, alignment=ft.Alignment.CENTER,
+                                         left=0, right=0, top=0, bottom=0),
+                            ft.Container(
+                                ft.Row([self.countdown_text, self.progress_ring], tight=True, spacing=16),
+                                alignment=ft.Alignment.CENTER_RIGHT,
+                                padding=ft.Padding.only(right=16),
+                                left=0, right=0, top=0, bottom=0,
+                            ),
+                        ],
                     ),
                 ],
                 alignment=ft.MainAxisAlignment.CENTER,
@@ -107,6 +119,13 @@ class OTPApp:
         )
         self.file_picker = ft.FilePicker()
         self.prefs = ft.SharedPreferences()
+        # Not available on web/Linux; the service raises there, so only create it where it works
+        self.lock_supported = not page.web and page.platform != ft.PagePlatform.LINUX
+        self.local_auth = fla.LocalAuthentication() if self.lock_supported else None
+        self.lock_enabled = False
+        self.locked = False
+        self._authenticating = False
+        self._hidden_at: float | None = None
 
     async def build(self):
         page = self.page
@@ -120,33 +139,62 @@ class OTPApp:
         page.theme_mode = ft.ThemeMode.DARK if saved_mode == "dark" else ft.ThemeMode.LIGHT
         self.theme_button = ft.IconButton(on_click=self.toggle_theme)
         self._sync_theme_button()
+        if self.lock_supported:
+            try:
+                self.lock_enabled = await self.prefs.get(LOCK_PREF_KEY) == "on"
+            except Exception:
+                self.lock_enabled = False
+        self.lock_button = ft.IconButton(on_click=self.toggle_lock, visible=self.lock_supported)
+        self._sync_lock_button()
+        page.on_app_lifecycle_state_change = self.on_lifecycle
         page.scroll = ft.ScrollMode.ADAPTIVE
         page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
         page.appbar = ft.AppBar(
             title=ft.Text("OTP App"),
             actions=[
+                self.lock_button,
                 self.theme_button,
             ],
         )
         page.floating_action_button = ft.FloatingActionButton(
             icon=ft.Icons.ADD, tooltip="Add account", on_click=lambda e: self.show_add_menu()
         )
-        page.add(
-            ft.Text("Tap to copy · swipe right for options · swipe left to delete",
-                    size=11, color=ft.Colors.ON_SURFACE_VARIANT),
-            self.list_view,
+        self.content = ft.Column(
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Text("Tap to copy · swipe right for options · swipe left to delete",
+                        size=11, color=ft.Colors.ON_SURFACE_VARIANT),
+                self.list_view,
+            ],
         )
+        self.lock_view = ft.Column(
+            visible=False,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=16,
+            controls=[
+                ft.Container(height=120),
+                ft.Icon(ft.Icons.LOCK, size=64, color=ft.Colors.PRIMARY),
+                ft.Text("OTP App is locked", size=18),
+                ft.FilledButton("Unlock", icon=ft.Icons.FINGERPRINT, on_click=self.unlock),
+            ],
+        )
+        page.add(self.content, self.lock_view)
         for account in self.accounts.values():
             self._add_tile(account)
+        if self.lock_enabled:
+            self.set_locked(True)
         page.update()
         page.run_task(self.tick)
+        if self.lock_enabled:
+            page.run_task(self.unlock)
 
     async def tick(self):
         while True:
             now = time.time()
-            for tile in self.tiles.values():
-                tile.refresh(now)
-            self.page.update()
+            if not self.locked:
+                for tile in self.tiles.values():
+                    tile.refresh(now)
+                self.page.update()
             await asyncio.sleep(1 - now % 1)
 
     # ---- theme ---------------------------------------------------------
@@ -165,6 +213,79 @@ class OTPApp:
             await self.prefs.set(THEME_PREF_KEY, "dark" if dark else "light")
         except Exception:
             logging.exception("Failed to save theme preference")
+
+    # ---- app lock ------------------------------------------------------
+
+    def _sync_lock_button(self):
+        self.lock_button.icon = ft.Icons.LOCK if self.lock_enabled else ft.Icons.LOCK_OPEN
+        self.lock_button.tooltip = "App lock: on" if self.lock_enabled else "App lock: off"
+
+    def set_locked(self, locked: bool):
+        self.locked = locked
+        if locked:
+            # Don't leave account options/dialogs showing over the lock screen
+            while self.page.pop_dialog():
+                pass
+        self.content.visible = not locked
+        self.lock_view.visible = locked
+        self.page.floating_action_button.visible = not locked
+        self.lock_button.disabled = locked
+        self.page.update()
+
+    async def authenticate(self, reason: str) -> bool:
+        """Shows the system prompt: fingerprint/face, or the phone's PIN/pattern/password."""
+        if self._authenticating:
+            return False
+        self._authenticating = True
+        try:
+            return await self.local_auth.authenticate(
+                reason,
+                persist_across_backgrounding=True,
+                android_messages=fla.AndroidAuthMessages(sign_in_title="OTP App"),
+            )
+        except fla.LocalAuthException as ex:
+            if ex.code == fla.LocalAuthErrorCode.NO_CREDENTIALS_SET:
+                self.snackbar("Set a screen lock (PIN, pattern or fingerprint) on your phone first", 4000)
+            elif ex.code not in (fla.LocalAuthErrorCode.USER_CANCELED,
+                                 fla.LocalAuthErrorCode.SYSTEM_CANCELED):
+                self.snackbar(f"Authentication failed: {ex}", 4000)
+            return False
+        except Exception as ex:
+            logging.exception("Authentication error")
+            self.snackbar(f"Authentication failed: {ex}", 4000)
+            return False
+        finally:
+            self._authenticating = False
+
+    async def unlock(self, e=None):
+        if await self.authenticate("Unlock to see your codes"):
+            self.set_locked(False)
+
+    async def toggle_lock(self, e=None):
+        enable = not self.lock_enabled
+        # Ask for the phone's lock both ways, so nobody else can turn it off
+        if not await self.authenticate("Confirm to turn app lock " + ("on" if enable else "off")):
+            return
+        self.lock_enabled = enable
+        self._sync_lock_button()
+        self.page.update()
+        try:
+            await self.prefs.set(LOCK_PREF_KEY, "on" if enable else "off")
+        except Exception:
+            logging.exception("Failed to save app lock preference")
+        self.snackbar("App lock on" if enable else "App lock off")
+
+    def on_lifecycle(self, e: ft.AppLifecycleStateChangeEvent):
+        # The auth prompt itself can pause the app; ignore that
+        if not self.lock_enabled or self._authenticating:
+            return
+        if e.state == ft.AppLifecycleState.HIDE:
+            self._hidden_at = time.monotonic()
+        elif e.state in (ft.AppLifecycleState.SHOW, ft.AppLifecycleState.RESUME):
+            hidden_at, self._hidden_at = self._hidden_at, None
+            if hidden_at is not None and not self.locked and time.monotonic() - hidden_at > RELOCK_AFTER:
+                self.set_locked(True)
+                self.page.run_task(self.unlock)
 
     # ---- helpers -------------------------------------------------------
 

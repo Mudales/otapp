@@ -5,6 +5,7 @@ Shows OTP codes like Google Authenticator. Built with [Flet](https://flet.dev) 1
 ## Features
 - Tap a code to copy it to the clipboard
 - Light / dark theme switch in the top bar (remembered between launches)
+- **App lock** (padlock in the top bar): unlock with fingerprint/face or the phone's PIN/pattern. Off by default; re-locks after 30s in the background
 - **Swipe right** on a card for options (copy, rename, delete), **swipe left** to delete (long-press also opens options)
 - Add accounts with the **+** button (bottom right):
   - **Camera scan** of a QR code

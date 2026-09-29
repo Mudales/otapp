@@ -1,5 +1,6 @@
 flet==1.0.2
 flet-camera==1.0.2
+flet-local-auth==1.0.2
 pyotp
 pillow
 pyzbar
