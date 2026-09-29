@@ -7,18 +7,21 @@ import base64
 import binascii
 import hashlib
 import re
+import secrets
 from dataclasses import asdict, dataclass
 from datetime import date
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 import pyotp
 
-from otp.migration_pb2 import MigrationPayload
+from otp.migration_pb2 import MigrationPayload, OtpParameters
 
 # Google Authenticator migration enums -> standard values
 MIGRATION_ALGORITHMS = {0: "SHA1", 1: "SHA1", 2: "SHA256", 3: "SHA512", 4: "MD5"}
 MIGRATION_DIGITS = {0: 6, 1: 6, 2: 8}
 MIGRATION_HOTP = 1
+MIGRATION_TOTP = 2
+MIGRATION_BATCH_SIZE = 10  # accounts per QR code, same as Google Authenticator
 
 SUPPORTED_ALGORITHMS = {"SHA1", "SHA256", "SHA512", "MD5"}
 
@@ -42,6 +45,21 @@ class Account:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def to_uri(self) -> str:
+        params = {"secret": self.secret}
+        if self.issuer:
+            params["issuer"] = self.issuer
+        if self.algorithm != "SHA1":
+            params["algorithm"] = self.algorithm
+        if self.digits != 6:
+            params["digits"] = self.digits
+        if self.period != 30:
+            params["period"] = self.period
+        return f"otpauth://totp/{quote(self.name, safe=':@')}?{urlencode(params, quote_via=quote)}"
+
+    def secret_bytes(self) -> bytes:
+        return base64.b32decode(self.secret + "=" * (-len(self.secret) % 8))
 
     @classmethod
     def from_stored(cls, name: str, value) -> Account:
@@ -130,3 +148,45 @@ def parse_any(text: str) -> tuple[list[Account], int]:
     if text.lower().startswith("otpauth://"):
         return [parse_otpauth_uri(text)], 0
     return [Account(name=f"Default- {date.today():%d/%m/%Y}", secret=normalize_secret(text))], 0
+
+
+def migration_compatible(account: Account) -> bool:
+    """Google Authenticator's export format has no period field and only 6 or 8 digits."""
+    return account.period == 30 and account.digits in (6, 8)
+
+
+def build_migration_uris(accounts: list[Account]) -> list[str]:
+    """Encodes accounts as otpauth-migration:// URIs (one per QR code) for Google Authenticator."""
+    algorithms = {"SHA1": 1, "SHA256": 2, "SHA512": 3, "MD5": 4}
+    accounts = [a for a in accounts if migration_compatible(a)]
+    batches = [
+        accounts[i:i + MIGRATION_BATCH_SIZE]
+        for i in range(0, len(accounts), MIGRATION_BATCH_SIZE)
+    ]
+    batch_id = secrets.randbits(31)
+    uris = []
+    for index, batch in enumerate(batches):
+        params = []
+        for acc in batch:
+            # We store "Issuer:account" as the name; Google keeps the issuer separately
+            name = acc.name
+            if acc.issuer and name.startswith(f"{acc.issuer}:"):
+                name = name[len(acc.issuer) + 1:]
+            params.append(OtpParameters(
+                secret=acc.secret_bytes(),
+                name=name,
+                issuer=acc.issuer,
+                algorithm=algorithms[acc.algorithm],
+                digits=1 if acc.digits == 6 else 2,
+                type=MIGRATION_TOTP,
+            ))
+        payload = MigrationPayload(
+            otp_parameters=params,
+            version=1,
+            batch_size=len(batches),
+            batch_index=index,
+            batch_id=batch_id,
+        )
+        data = base64.b64encode(payload.to_bytes()).decode("ascii")
+        uris.append(f"otpauth-migration://offline?data={quote(data, safe='')}")
+    return uris

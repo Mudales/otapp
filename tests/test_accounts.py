@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import json
@@ -81,11 +82,11 @@ def test_store_roundtrip_and_legacy(tmp_path):
     path = tmp_path / "otp_secrets.json"
     path.write_text(json.dumps({"PyPI": SECRET}))  # old {name: secret} format
     store = AccountStore(path)
-    accounts = store.load()
+    accounts = asyncio.run(store.load())
     assert accounts["PyPI"] == Account(name="PyPI", secret=SECRET)
     accounts["X"] = Account(name="X", secret=SECRET, digits=8)
-    store.save(accounts)
-    assert AccountStore(path).load() == accounts
+    asyncio.run(store.save(accounts))
+    assert asyncio.run(AccountStore(path).load()) == accounts
 
 
 def test_decode_qr_image():

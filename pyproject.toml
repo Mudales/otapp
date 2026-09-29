@@ -1,6 +1,6 @@
 [project]
 name = "otapp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Android OTP authenticator built with Flet"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -8,6 +8,9 @@ dependencies = [
     "flet==1.0.2",
     "flet-camera==1.0.2",
     "flet-local-auth==1.0.2",
+    "flet-secure-storage==1.0.2",
+    "cryptography",
+    "qrcode",
     "pyotp",
     "pillow",
     "pyzbar",

@@ -13,8 +13,13 @@ Shows OTP codes like Google Authenticator. Built with [Flet](https://flet.dev) 1
   - Pasting an `otpauth://totp/...` URI or a bare base32 secret
 - **Google Authenticator export**: scan or paste the `otpauth-migration://` QR (Google Authenticator → Transfer accounts → Export). All accounts in it are imported; HOTP (counter-based) accounts are skipped.
 - Supports custom digits / period / algorithm (SHA1, SHA256, SHA512)
+- **Search** accounts by name or issuer
+- **Reorder** by dragging the handle on a card (or "Move to top" in its options)
+- **Next code preview** during the last 5 seconds of each period
+- **Encrypted backup / restore** (⋮ menu): a password-protected `.otapp` file (scrypt + AES-256-GCM). Restoring only adds accounts you don't already have
+- **Export**: "Show QR code" per account, or ⋮ → Export to Google Authenticator (one QR per 10 accounts)
 
-Secrets are stored in the app's private data directory (`FLET_APP_STORAGE_DATA`), not in `assets/`.
+On Android/iOS, secrets are stored encrypted with a key held in the Android Keystore / iOS Keychain (`flet-secure-storage`). Accounts saved as plain JSON by older versions are moved there on first launch. On web/desktop (development) they're a JSON file in `FLET_APP_STORAGE_DATA`.
 
 ## Development
 ```bash

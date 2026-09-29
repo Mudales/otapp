@@ -16,3 +16,14 @@ def decode_qr(image_bytes: bytes) -> list[str]:
         # Dark-mode / inverted QR codes
         results = decode(ImageOps.invert(img), symbols=[ZBarSymbol.QRCODE])
     return [r.data.decode("utf-8", errors="replace") for r in results]
+
+
+def make_qr_png(text: str, box_size: int = 8) -> bytes:
+    import qrcode
+
+    qr = qrcode.QRCode(box_size=box_size, border=3, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    qr.add_data(text)
+    qr.make(fit=True)
+    buf = io.BytesIO()
+    qr.make_image(fill_color="black", back_color="white").save(buf, format="PNG")
+    return buf.getvalue()

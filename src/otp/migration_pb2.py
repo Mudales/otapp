@@ -1,4 +1,4 @@
-"""Manual protobuf wire-format decoder for Google Authenticator migration payload.
+"""Manual protobuf wire-format decoder/encoder for Google Authenticator migration payload.
 
 Avoids requiring protoc or version-specific protobuf internals.
 Schema: https://github.com/nickoala/extract_otp_secret_keys
@@ -21,6 +21,27 @@ def _read_varint(data: bytes, pos: int) -> tuple[int, int]:
             break
         shift += 7
     return result, pos
+
+
+def _write_varint(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            return bytes(out)
+
+
+def _write_field(field_number: int, value) -> bytes:
+    """Encodes an int as a varint field, or bytes/str as a length-delimited field."""
+    if isinstance(value, int):
+        return _write_varint(field_number << 3) + _write_varint(value)
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return _write_varint(field_number << 3 | 2) + _write_varint(len(value)) + value
 
 
 def _parse_fields(data: bytes) -> dict[int, list]:
@@ -74,6 +95,17 @@ class OtpParameters:
             counter=fields.get(7, [0])[0],
         )
 
+    def to_bytes(self) -> bytes:
+        return b"".join([
+            _write_field(1, self.secret),
+            _write_field(2, self.name),
+            _write_field(3, self.issuer),
+            _write_field(4, self.algorithm),
+            _write_field(5, self.digits),
+            _write_field(6, self.type),
+            _write_field(7, self.counter),
+        ])
+
 
 @dataclass
 class MigrationPayload:
@@ -95,4 +127,15 @@ class MigrationPayload:
             batch_size=fields.get(3, [0])[0],
             batch_index=fields.get(4, [0])[0],
             batch_id=fields.get(5, [0])[0],
+        )
+
+    def to_bytes(self) -> bytes:
+        return b"".join(
+            [_write_field(1, otp.to_bytes()) for otp in self.otp_parameters]
+            + [
+                _write_field(2, self.version),
+                _write_field(3, self.batch_size),
+                _write_field(4, self.batch_index),
+                _write_field(5, self.batch_id),
+            ]
         )
