@@ -29,7 +29,7 @@ class OTPTile:
                 [
                     ft.Row([self.name_text], alignment=ft.MainAxisAlignment.CENTER),
                     ft.Row(
-                        [self.otp_text, self.countdown_text, self.progress_ring],
+                        [self.otp_text, ft.Container(width=14), self.countdown_text, self.progress_ring],
                         alignment=ft.MainAxisAlignment.CENTER,
                     ),
                 ],
@@ -125,10 +125,6 @@ class OTPApp:
         page.appbar = ft.AppBar(
             title=ft.Text("OTP App"),
             actions=[
-                ft.IconButton(ft.Icons.QR_CODE_SCANNER, tooltip="Scan with camera",
-                              on_click=self.scan_camera),
-                ft.IconButton(ft.Icons.IMAGE, tooltip="Import QR from image",
-                              on_click=self.scan_image),
                 self.theme_button,
             ],
         )

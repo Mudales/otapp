@@ -6,9 +6,9 @@ Shows OTP codes like Google Authenticator. Built with [Flet](https://flet.dev) 1
 - Tap a code to copy it to the clipboard
 - Light / dark theme switch in the top bar (remembered between launches)
 - **Swipe right** on a card for options (copy, rename, delete), **swipe left** to delete (long-press also opens options)
-- Add accounts with the **+** button:
-  - **Camera scan** of a QR code (top-bar scanner icon)
-  - **QR from an image** / screenshot in the gallery (top-bar image icon)
+- Add accounts with the **+** button (bottom right):
+  - **Camera scan** of a QR code
+  - **QR from an image** / screenshot in the gallery
   - Pasting an `otpauth://totp/...` URI or a bare base32 secret
 - **Google Authenticator export**: scan or paste the `otpauth-migration://` QR (Google Authenticator → Transfer accounts → Export). All accounts in it are imported; HOTP (counter-based) accounts are skipped.
 - Supports custom digits / period / algorithm (SHA1, SHA256, SHA512)
