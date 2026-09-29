@@ -1,0 +1,33 @@
+[project]
+name = "otapp"
+version = "0.2.0"
+description = "Android OTP authenticator built with Flet"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "flet==1.0.2",
+    "flet-camera==1.0.2",
+    "pyotp",
+    "pillow",
+    "pyzbar",
+]
+
+[dependency-groups]
+dev = ["flet[all]==1.0.2", "pytest"]
+
+[tool.flet]
+product = "OTP App"
+org = "com.mudales"
+company = "Mudales"
+
+[tool.flet.app]
+path = "src"
+
+[tool.flet.android.permission]
+"android.permission.CAMERA" = true
+
+[tool.flet.android.feature]
+"android.hardware.camera" = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

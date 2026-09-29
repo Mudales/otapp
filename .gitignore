@@ -9,8 +9,9 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
-assets\otp_secrets.json
-assets\__pycache__
+assets/otp_secrets.json
+storage/
+src/**/__pycache__
 develop-eggs/
 dist/
 downloads/
