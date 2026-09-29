@@ -40,7 +40,7 @@ The camera permission is declared in `pyproject.toml` (`[tool.flet.android.permi
 ### CI builds and releases
 `.github/workflows/build-apk.yml`:
 - **Actions → Build APK → Run workflow** builds a test APK (download it from the run's artifacts).
-- Pushing a tag `vX.Y.Z` builds both APKs and publishes a GitHub Release with them attached.
+- Pushing a tag `vX.Y.Z` builds both APKs and, once the signing secrets below are set, publishes a GitHub Release with them attached.
 
 **Signing:** add these repository secrets so every build is signed with the same key. Without them,
 each build gets a throwaway debug key, and Android refuses to install it over the previous build
